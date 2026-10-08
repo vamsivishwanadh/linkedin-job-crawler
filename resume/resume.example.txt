@@ -1,0 +1,7 @@
+Paste your resume here as plain text (export from PDF or copy from LinkedIn).
+Include skills, job titles, years of experience, and technologies — matching uses this text.
+
+Example:
+Senior Software Engineer with 5+ years building backend APIs in Python and Go.
+Experience with AWS, Kubernetes, PostgreSQL, Redis, and distributed systems.
+Led teams of 3–5 engineers; strong system design and CI/CD (GitHub Actions).

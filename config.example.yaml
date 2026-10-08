@@ -1,0 +1,32 @@
+# Copy to config.yaml and edit for your search.
+
+apify:
+  actor_id: bebity/linkedin-jobs-scraper
+  # LinkedIn date filter: r86400 = past 24 hours, r604800 = past week
+  published_at: r86400
+  company_profile: true
+  enrich_company: false
+  # Per title×location search; actor max is 1000. Use 0 for "all available" (costs more).
+  max_rows_per_search: 200
+
+search:
+  titles:
+    - Software Engineer
+  locations:
+    - India
+  work_types: []          # e.g. ["2"] remote — see README for codes
+  contract_types: []      # e.g. ["F"] full-time
+  experience_levels: []   # e.g. ["4"] mid-senior — see README
+  easy_apply: false
+  under_10_applicants: false
+
+matching:
+  resume_path: resume/resume.txt
+  min_match_score: 0.12   # 0–1 TF-IDF cosine similarity; tune after first run
+  min_hours_since_posted: 0
+  max_hours_since_posted: 24
+
+export:
+  excel_path: data/jobs.xlsx
+  sheet_name: jobs
+  min_score_to_export: 0.12
