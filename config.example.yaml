@@ -30,3 +30,10 @@ export:
   excel_path: data/jobs.xlsx
   sheet_name: jobs
   min_score_to_export: 0.12
+
+resume:
+  output_dir: data/resumes
+  strict_validation: true
+  allow_warnings_pdf: true
+  skill_min_confidence: 0.9   # skills need >= this fuzzy match vs master resume (0–1)
+  # model: gpt-4o-mini   # optional; defaults to OPENAI_MODEL env var

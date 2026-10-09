@@ -1,116 +1,266 @@
-# LinkedIn Job Crawler (v1)
+# LinkedIn Job Crawler
 
-Daily LinkedIn job search via [Apify](https://apify.com/), filtered to the **last 24 hours**, scored against your **resume**, and appended to an **Excel** workbook. Designed to run on your PC with **Windows Task Scheduler**.
+Daily LinkedIn job search via [Apify](https://apify.com/), filtered to the **last 24 hours**, scored against your **resume**, and appended to an **Excel** workbook. Optional **AI-tailored PDF resumes** per job. Designed to run on your PC with **Windows Task Scheduler**.
 
-## What v1 does
+## Crawler (v1)
 
-| Step | Behavior |
-|------|----------|
-| Search | Calls `bebity/linkedin-jobs-scraper` (no LinkedIn login required for public job listings) |
-| Recency | Apify input `publishedAt: r86400` + optional client-side hour window |
-| Fit | TF-IDF cosine similarity between your resume text and each job (title + company + description) |
-| Export | Dedupes by job `id`, appends to `data/jobs.xlsx` |
+| Step    | Behavior                                                                     |
+| ------- | ---------------------------------------------------------------------------- |
+| Search  | Calls `bebity/linkedin-jobs-scraper` (no LinkedIn login for public listings) |
+| Recency | Apify `publishedAt: r86400` + optional client-side hour window               |
+| Fit     | TF-IDF cosine similarity vs `resume/resume.txt`                              |
+| Export  | Dedupes by job `id`, writes `data/jobs.xlsx`                                 |
 
-## What v1 does *not* do (v2 ideas)
+## Resume generator
 
-- Log into LinkedIn with your account or cookies
-- Tailor a resume per job or submit Easy Apply / external applications
-- LLM-based ranking (easy to add later on top of the same pipeline)
+| Step           | Behavior                                                                   |
+| -------------- | -------------------------------------------------------------------------- |
+| Master resume  | Reuses `resume/resume.txt` via `load_resume_text()` (same as scoring)      |
+| Job from Excel | Reads `export.excel_path` / `description` column (full JD when crawled)    |
+| Manual JD      | `--jd-file` or `--jd-paste`                                                |
+| LLM            | OpenAI JSON → JD analysis + tailored resume (Pydantic)                     |
+| Validation     | Evidence quotes must appear in master resume; unsupported claims block PDF |
+| Output         | PDF + `.meta.json` + `.preview.json` under `data/resumes/`                 |
 
-**Note:** Scraping public job listings is common for personal job search, but LinkedIn’s Terms of Service restrict automated access. Use this for your own job hunt, keep volume reasonable, and avoid storing unnecessary personal data from listings.
+**Not included:** LinkedIn login, URL scraping for JDs, auto-apply, or changing TF-IDF scoring.
 
 ## Quick start
 
-1. **Apify account** — Create a token at [Apify Integrations](https://console.apify.com/account/integrations). New accounts get free monthly credits; you pay per job returned by the actor.
+```powershell
+cd C:\Users\vamsi\Projects\linkedin-job-crawler
+python -m venv .venv
+.\.venv\Scripts\pip install -r requirements.txt
+copy .env.example .env
+copy config.example.yaml config.yaml
+copy resume\resume.example.txt resume\resume.txt
+```
 
-2. **Clone / open this folder** and create a virtual environment:
+- `.env`: `APIFY_TOKEN` (crawler), `OPENAI_API_KEY` (resume generator), optional `OPENAI_MODEL`
+- `config.yaml`: search + `resume:` block (see `config.example.yaml`)
+- Paste your resume into `resume/resume.txt`
 
-   ```powershell
-   cd C:\Users\vamsi\Projects\linkedin-job-crawler
-   python -m venv .venv
-   .\.venv\Scripts\pip install -r requirements.txt
-   ```
+### Crawl jobs
 
-3. **Configure**
+```powershell
+.\.venv\Scripts\python -m src.main --dry-run
+.\.venv\Scripts\python -m src.main
+# equivalent: python -m src.main crawl
+```
 
-   ```powershell
-   copy .env.example .env
-   copy config.example.yaml config.yaml
-   copy resume\resume.example.txt resume\resume.txt
-   ```
+Output: `data/jobs.xlsx` (close Excel before writing to avoid permission errors).
 
-   - Put your Apify token in `.env`
-   - Edit `config.yaml`: job titles, locations, experience filters, match thresholds
-   - Paste your resume into `resume/resume.txt`
+### Generate a tailored resume
 
-4. **Dry run** (config + resume only):
+List jobs from the workbook:
 
-   ```powershell
-   .\.venv\Scripts\python -m src.main --dry-run
-   ```
+```powershell
+.\.venv\Scripts\python -m src.main resume --list
+```
 
-5. **Full run**:
+From a crawled job (uses `description` in Excel):
 
-   ```powershell
-   .\.venv\Scripts\python -m src.main
-   ```
+```powershell
+.\.venv\Scripts\python -m src.main resume --job-id 4477101573
+```
 
-   Output: `data/jobs.xlsx`
+Preview only (no PDF, writes `*.preview.json`):
 
-6. **Schedule daily** (example 8:00 AM):
+```powershell
+.\.venv\Scripts\python -m src.main resume --job-id 4477101573 --preview-only
+```
 
-   ```powershell
-   .\scripts\register_scheduled_task.ps1 -Time "08:00"
-   ```
+From a text file:
 
-   Or run manually: `.\scripts\run_daily.ps1` (logs under `logs/`).
+```powershell
+.\.venv\Scripts\python -m src.main resume --jd-file .\jd.txt --title "Backend Engineer" --company "Acme"
+```
 
-## Config reference
+Paste JD (Ctrl+Z then Enter on Windows):
 
-### Apify actor
+```powershell
+.\.venv\Scripts\python -m src.main resume --jd-paste --title "Role" --company "Co"
+```
 
-Default: [`bebity/linkedin-jobs-scraper`](https://apify.com/bebity/linkedin-jobs-scraper) — supports 2026 LinkedIn filters including date posted and experience level. Set `enrich_company: true` only if you want extra fields (extra cost per job).
+Outputs: `data/resumes/Company_Role.pdf` (timestamp suffix if file exists), plus `.meta.json` and `.preview.json`.
 
-### Date posted (`publishedAt`)
+### Schedule daily crawl
 
-| Value | Meaning |
-|-------|---------|
-| `r86400` | Past 24 hours |
-| `r604800` | Past week |
-| `r2592000` | Past month |
+```powershell
+.\scripts\register_scheduled_task.ps1 -Time "08:00"
+```
 
-### Experience levels (`experienceLevels` in actor input)
+Scheduled task runs **crawl only**, not resume generation.
 
-Configure in `config.yaml` under `search.experience_levels` using LinkedIn’s codes (same as in a filtered search URL), for example:
+## JD resolution (workbook jobs)
 
-- `1` — Internship  
-- `2` — Entry level  
-- `3` — Associate  
-- `4` — Mid-Senior level  
-- `5` — Director  
-- `6` — Executive  
+1. Full `description` cell in `data/jobs.xlsx` (primary; populated by crawler)
+2. No separate job database or JSON cache
+3. Job URL fetch is **not** implemented — use `--jd-file` / `--jd-paste` if description is missing
+4. Will not generate from title/company alone
 
-Leave empty to not filter by level at search time; resume scoring still ranks fit.
+## Environment variables
 
-### Work types (`workTypes`)
+| Variable         | Required for      | Purpose               |
+| ---------------- | ----------------- | --------------------- |
+| `APIFY_TOKEN`    | Crawl             | Apify API             |
+| `OPENAI_API_KEY` | Resume            | OpenAI API            |
+| `OPENAI_MODEL`   | Resume (optional) | Default `gpt-4o-mini` |
 
-Examples from the actor docs: `1` on-site, `2` remote, `3` hybrid (verify against a LinkedIn search URL you care about).
+## Config: `resume` section
 
-### Match score
+```yaml
+resume:
+  output_dir: data/resumes
+  strict_validation: true
+  allow_warnings_pdf: true
+```
 
-`min_match_score` and `min_score_to_export` are cosine similarities in `0–1`. Start around `0.12` and raise if you get too much noise, or lower if you miss good roles.
+## API costs
 
-## v2 roadmap (your ideas)
+Each resume run uses **two** LLM calls (analysis + tailoring). Use `--preview-only` to inspect JSON before paying for a full run. Crawler costs are per Apify job returned.
 
-1. **Custom resume per job** — Generate a tailored PDF/DOCX from base resume + job description (LLM or template + keyword injection).
-2. **Submit applications** — Would require LinkedIn session (cookies), Playwright automation, and careful rate limits; high ToS/account risk. Better scoped as optional “assist” (open apply URL + prefilled answers) before full auto-submit.
+## Validation limits
+
+Validation checks that bullet `evidence` strings appear in the master resume and flags unknown companies/skills. It is **heuristic**, not a guarantee against hallucinations — review `*.preview.json` before applying.
+
+## Privacy / gitignore
+
+Ignored: `.env`, `config.yaml`, `resume/resume.txt`, `data/*.xlsx`, `data/resumes/`, `*.meta.json`, `*.preview.json`.
+
+## Tests
+
+```powershell
+.\.venv\Scripts\pytest
+```
+
+Uses mocked LLM for pipeline tests (no API charges).
 
 ## Project layout
 
 ```
-config.yaml          # your search + thresholds (not committed)
-resume/resume.txt    # plain-text resume for matching
-src/main.py          # entrypoint
-scripts/run_daily.ps1
-data/jobs.xlsx       # generated output
+src/main.py           # crawl + resume subcommands
+src/matching.py       # master resume load + TF-IDF (unchanged algorithm)
+src/export.py         # Excel write schema
+src/workbook_jobs.py  # Excel read + job id lookup
+src/resume/           # LLM, validation, PDF
+data/jobs.xlsx        # crawler output
+data/resumes/         # generated PDFs
 ```
+
+## Crawler config reference
+
+Edit `config.yaml` (copy from `config.example.yaml`). The crawler reads the `apify`, `search`, `matching`, and `export` sections.
+
+### Apify actor
+
+Default: [`bebity/linkedin-jobs-scraper`](https://apify.com/bebity/linkedin-jobs-scraper) — supports LinkedIn filters including date posted and experience level. Set `enrich_company: true` only if you want extra fields (extra cost per job).
+
+| Key                         | Meaning                                                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `apify.actor_id`            | Apify actor id (default above)                                                                          |
+| `apify.published_at`        | How far back to search on LinkedIn (see table below)                                                    |
+| `apify.max_rows_per_search` | Max jobs **per** title × location search (actor allows up to 1000; use `0` for all pages — higher cost) |
+| `apify.company_profile`     | Company details on each job (on by default)                                                             |
+| `apify.enrich_company`      | Extra hiring-contact / timestamp fields (paid add-on per job)                                           |
+
+### Date posted (`apify.published_at`)
+
+Sent to Apify as `publishedAt`:
+
+| Value      | Meaning       |
+| ---------- | ------------- |
+| `r86400`   | Past 24 hours |
+| `r604800`  | Past week     |
+| `r2592000` | Past month    |
+
+You can also tighten recency in `matching.max_hours_since_posted` / `max_hours_since_posted` (client-side filter after fetch).
+
+### Search filters (`search` in `config.yaml`)
+
+| Key                          | Meaning                                                 |
+| ---------------------------- | ------------------------------------------------------- |
+| `search.titles`              | Job titles / keywords (each title is a separate search) |
+| `search.locations`           | Locations (each title × each location is one search)    |
+| `search.work_types`          | On-site / remote / hybrid (see codes below)             |
+| `search.contract_types`      | Job type, e.g. full-time (see codes below)              |
+| `search.experience_levels`   | Seniority filter (see codes below)                      |
+| `search.easy_apply`          | Only Easy Apply jobs                                    |
+| `search.under_10_applicants` | Only jobs with fewer than 10 applicants                 |
+
+Leave a list empty (`[]`) to skip that filter at search time. Resume TF-IDF scoring still ranks fit either way.
+
+### Experience levels (`search.experience_levels`)
+
+Use LinkedIn’s numeric codes (same as in a filtered search URL), for example:
+
+| Code | Level            |
+| ---- | ---------------- |
+| `1`  | Internship       |
+| `2`  | Entry level      |
+| `3`  | Associate        |
+| `4`  | Mid-Senior level |
+| `5`  | Director         |
+| `6`  | Executive        |
+
+Example — mid-senior and director only:
+
+```yaml
+search:
+  experience_levels: ["4", "5"]
+```
+
+### Work types (`search.work_types`)
+
+| Code | Type    |
+| ---- | ------- |
+| `1`  | On-site |
+| `2`  | Remote  |
+| `3`  | Hybrid  |
+
+Example — remote and hybrid:
+
+```yaml
+search:
+  work_types: ["2", "3"]
+```
+
+Verify codes against a LinkedIn job search URL you care about if results look wrong.
+
+### Contract types (`search.contract_types`)
+
+Common Apify / LinkedIn values include:
+
+| Code | Type       |
+| ---- | ---------- |
+| `F`  | Full-time  |
+| `P`  | Part-time  |
+| `C`  | Contract   |
+| `T`  | Temporary  |
+| `I`  | Internship |
+| `V`  | Volunteer  |
+
+Example:
+
+```yaml
+search:
+  contract_types: ["F"]
+```
+
+### Match score (`matching` / `export`)
+
+| Key                          | Meaning                                                                |
+| ---------------------------- | ---------------------------------------------------------------------- |
+| `matching.min_match_score`   | Minimum TF-IDF cosine similarity (0–1) to count as a match after crawl |
+| `export.min_score_to_export` | Minimum score to write a row to Excel (often same as above)            |
+| `matching.resume_path`       | Master resume for scoring (default `resume/resume.txt`)                |
+
+Scores are **lexical** overlap between your resume and each job’s title + company + description — not years-of-experience logic. Start around `0.12` and raise if you get noise, or lower if you miss good roles.
+
+### Excel export (`export`)
+
+| Key                 | Meaning                                    |
+| ------------------- | ------------------------------------------ |
+| `export.excel_path` | Output workbook (default `data/jobs.xlsx`) |
+| `export.sheet_name` | Worksheet name (default `jobs`)            |
+
+Rows are deduped by job `id`; re-crawling updates existing ids. Close the file in Excel before running the crawler to avoid permission errors.

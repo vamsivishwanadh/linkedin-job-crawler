@@ -9,5 +9,8 @@ __pycache__/
 .mypy_cache/
 data/*.xlsx
 data/*.json
+data/resumes/
+*.preview.json
+*.meta.json
 output/
 *.log
